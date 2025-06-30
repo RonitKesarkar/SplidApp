@@ -50,7 +50,8 @@ def create_group():
     if request.method=='POST':
         title=request.form["title"]
         type=request.form["type"]
-        group=Group(title=title, type=type)
+        date=datetime.now().strftime("%d %b %X")
+        group=Group(title=title, type=type, date=date)
         db.session.add(group)
         db.session.commit()
     allGroups=Group.query.all()
@@ -159,7 +160,8 @@ def add_expense(id):
                             mem.balance=round(mem.balance-share, 2)
                             db.session.add(mem)
                             db.session.commit()
-            expense=Expense(name=name, group_id=group_id, amt=amt, paid_by=paid_by, paid_for=paid_for)
+            date=datetime.now().strftime("%d %b %X")
+            expense=Expense(name=name, group_id=group_id, amt=amt, paid_by=paid_by, paid_for=paid_for, date=date)
             db.session.add(expense)
             db.session.commit()
             group=Group.query.filter_by(id=id).first()
@@ -326,7 +328,8 @@ def save_payments(payment):
     amt=float(pay[0])
     paid_by=""+expense[0]
     paid_by=paid_by[2:]
-    expense=Expense(group_id=group_id, name=name, amt=amt, paid_by=paid_by, paid_for=paid_for)
+    date=datetime.now().strftime("%d %b %X")
+    expense=Expense(group_id=group_id, name=name, amt=amt, paid_by=paid_by, paid_for=paid_for, date=date)
     db.session.add(expense)
     db.session.commit()
     group=Group.query.filter_by(id=id).first()
