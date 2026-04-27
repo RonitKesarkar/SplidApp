@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block  body %}
+<nav class="navbar navbar-expand-lg bg-body-tertiary">
+    <div class="container-fluid">
+      <a class="navbar-brand" href="/">Split It!</a>
+      <a href="/back_to_group/{{group.id}}" type="button" class="btn btn-dark btn-sm mx-1">Back</a>
+    </div>
+  </nav>
+<div class="container my-3">
+  <h2>Member Details:</h2>
+  <form action="/update_member/{{member.id}}" method="POST">
+    <div class="mb-3">
+      <label for="name" class="form-label">Member Name</label>
+      <input type="text" class="form-control" name="name" id="name" value={{member.name}} required>
+        <label for="amt" class="form-label">Expense: {{member.expense}}</label>
+        <br>
+        <label for="amt" class="form-label">Balance: {{member.balance}}</label>
+    </div>
+  <button type="submit" class="btn btn-dark">Update</button>
+  </form>
+</div>
+<script language="JavaScript">
+  function toggle(source) {
+    var checkboxes = document.querySelectorAll('input[type="checkbox"]');
+    for (var i = 0; i < checkboxes.length; i++) {
+        if (checkboxes[i] != source)
+            checkboxes[i].checked = source.checked;
+    }
+}
+</script>
+{% endblock  body %}

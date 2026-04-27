@@ -24,6 +24,7 @@
                 <th scope="col">Paid</th>
                 <th scope="col">Expense</th>
                 <th scope="col">Balance</th>
+                <th scope="col">Action</th>
               </tr>
             </thead>
             <tbody>
@@ -34,6 +35,9 @@
                 <td>{{member.paid}}</td>
                 <td>{{member.expense}}</td>
                 <td>{{member.balance}}</td>
+                <td>
+                  <a href="/update_member/{{member.id}}" type="button" class="btn btn-dark btn-sm mx-1">Edit</a>
+                <td>
               </tr>
               {% endfor %}
             </tbody>

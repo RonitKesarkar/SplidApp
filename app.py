@@ -1,3 +1,5 @@
+from enum import member
+
 from flask import Flask, render_template, request, redirect, flash
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
@@ -124,6 +126,21 @@ def add_member(id):
         return render_template("group.html", group=group, members=members, expenses=expenses)
     group=Group.query.filter_by(id=id).first()
     return render_template("member.html", group=group)
+
+@app.route('/update_member/<int:id>', methods=['GET', 'POST'])
+def update_member(id):
+    if request.method=='POST':
+        member=Member.query.filter_by(id=id).first()
+        member.name=request.form["name"]
+        db.session.add(member)
+        db.session.commit()
+        group=Group.query.filter_by(id=member.group_id).first()
+        members=db.session.query(Member).filter_by(group_id=member.group_id).all()
+        expenses=db.session.query(Expense).filter_by(group_id=member.group_id).all()
+        return render_template("group.html", group=group, members=members, expenses=expenses)
+    member=Member.query.filter_by(id=id).first()
+    group = Group.query.filter_by(id=member.group_id).first()
+    return render_template("member_update.html", member=member, group=group)
 
 @app.route('/add_expense/<int:id>', methods=['GET', 'POST'])
 def add_expense(id):
