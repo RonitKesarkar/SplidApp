@@ -1,58 +1,53 @@
-from enum import member
-
 from flask import Flask, render_template, request, redirect, flash
 from flask_sqlalchemy import SQLAlchemy
-from datetime import datetime
+from datetime import datetime, timezone
 import re
 
+from sqlalchemy.dialects.postgresql import ARRAY # Important for your paid_for column
+
 app = Flask(__name__)
-app.secret_key = "secret key"
-app.config['SQLALCHEMY_DATABASE_URI']="sqlite:///groups.db"
-app.config['SQLALCHEMY_BINDS']={"members":"sqlite:///members.db",
-                                "expenses":"sqlite:///expenses.db"}
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS']=False
-db=SQLAlchemy(app)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:password@localhost:5432/splid_app'
+db = SQLAlchemy(app)
 
 class Group(db.Model):
-    id=db.Column(db.Integer, primary_key=True)
-    title=db.Column(db.String(200), nullable=False)
-    type=db.Column(db.String(200), nullable=False)
-    date=db.Column(db.String, default=datetime.now().strftime("%d %b %X"))
-
-    def __repr__(self)->str:
-        return f"{self.id} - {self.title}"
+    __tablename__ = 'group'
+    __table_args__ = {'schema': 'splid_app'}
+    
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(20), nullable=True)
+    type = db.Column(db.String(10), nullable=True)
+    date = db.Column(db.DateTime(timezone=True))
 
 class Member(db.Model):
-    __bind_key__="members"
-    id=db.Column(db.Integer, primary_key=True)
-    group_id=db.Column(db.Integer, nullable=False)
-    name=db.Column(db.String(200), nullable=False)
-    paid=db.Column(db.Integer, default=0)
-    expense=db.Column(db.Integer, default=0)
-    balance=db.Column(db.Integer, default=0)
-
-    def __repr__(self)->str:
-        return f"{self.id} - {self.name}"
+    __tablename__ = 'member'
+    __table_args__ = {'schema': 'splid_app'}
     
-class Expense(db.Model):
-    __bind_key__="expenses"
-    id=db.Column(db.Integer, primary_key=True)
-    group_id=db.Column(db.Integer, nullable=False)
-    name=db.Column(db.String(200), nullable=False)
-    amt=db.Column(db.Integer, default=0)
-    paid_by=db.Column(db.String, default=0)
-    paid_for=db.Column(db.String, default=0)
-    date=db.Column(db.String, default=datetime.now().strftime("%d %b %X"))
+    id = db.Column(db.Integer, primary_key=True)
+    group_id = db.Column(db.Integer, db.ForeignKey('splid_app.group.id'), nullable=False)
+    name = db.Column(db.String, nullable=False)
+    paid = db.Column(db.Integer, default=0)
+    expense = db.Column(db.Integer, default=0)
+    balance = db.Column(db.Integer, default=0)
 
-    def __repr__(self)->str:
-        return f"{self.id} - {self.name}"
+class Expense(db.Model):
+    __tablename__ = 'expense'
+    __table_args__ = {'schema': 'splid_app'}
+    
+    id = db.Column(db.Integer, primary_key=True)
+    group_id = db.Column(db.Integer, db.ForeignKey('splid_app.group.id'), nullable=False)
+    name = db.Column(db.String, nullable=False)
+    amt = db.Column(db.Integer)
+    paid_by = db.Column(db.Integer, db.ForeignKey('splid_app.member.id'))
+    # Using the PostgreSQL specific ARRAY type for integer IDs
+    paid_for = db.Column(ARRAY(db.Integer)) 
+    date = db.Column(db.DateTime(timezone=True))
 
 @app.route('/', methods=['GET', 'POST'])
 def create_group():
     if request.method=='POST':
         title=request.form["title"]
         type=request.form["type"]
-        date=datetime.now().strftime("%d %b %X")
+        date=datetime.now(timezone.utc)
         group=Group(title=title, type=type, date=date)
         db.session.add(group)
         db.session.commit()
@@ -75,12 +70,11 @@ def change_name(id):
 
 @app.route('/delete_group/<int:id>')
 def delete_group(id):
-    group=Group.query.filter_by(id=id).first()
-    db.session.delete(group)
+    Expense.query.filter_by(group_id=id).delete()
     db.session.commit()
     Member.query.filter_by(group_id=id).delete()
     db.session.commit()
-    Expense.query.filter_by(group_id=id).delete()
+    Group.query.filter_by(id=id).delete()
     db.session.commit()
     return redirect("/")
 
@@ -148,13 +142,14 @@ def add_expense(id):
         name=request.form["name"]
         group_id=id
         amt=int(request.form["amt"])
-        paid_by=request.form["paid_by"]
-        paid_for=""
+        paid_by_name=request.form["paid_by"]
+        paid_by=Member.query.filter_by(name=paid_by_name, group_id=id).first()
+        paid_for=[]
         i=0
         for key, val in request.form.items():
             if key.startswith("mem"):
-                paid_for+=val
-                paid_for+=" "
+                paid_for_mem=Member.query.filter_by(name=val, group_id=id).first()
+                paid_for.append(paid_for_mem.id)
                 i+=1
         if i==0:
             flash('Please add atleast 1 member to split the expense!')
@@ -162,10 +157,9 @@ def add_expense(id):
             members=db.session.query(Member).filter_by(group_id=id).all()
             return render_template("expense.html", group=group, members=members)
         else:
-            mem=Member.query.filter_by(name=paid_by, group_id=group_id).first()
-            mem.paid=round(mem.paid+amt, 2)
-            mem.balance=round(mem.balance+amt,2)
-            db.session.add(mem)
+            paid_by.paid = round(paid_by.paid + amt, 2)
+            paid_by.balance = round(paid_by.balance + amt, 2)
+            db.session.add(paid_by)
             db.session.commit()
             share=round(amt/i, 2)
             members=db.session.query(Member).filter_by(group_id=id).all()
@@ -177,8 +171,8 @@ def add_expense(id):
                             mem.balance=round(mem.balance-share, 2)
                             db.session.add(mem)
                             db.session.commit()
-            date=datetime.now().strftime("%d %b %X")
-            expense=Expense(name=name, group_id=group_id, amt=amt, paid_by=paid_by, paid_for=paid_for, date=date)
+            date=datetime.now(timezone.utc)
+            expense=Expense(name=name, group_id=group_id, amt=amt, paid_by=paid_by.id, paid_for=paid_for, date=date)
             db.session.add(expense)
             db.session.commit()
             group=Group.query.filter_by(id=id).first()
@@ -232,15 +226,14 @@ def suggested_payments(id):
 def change_expense(id):
     if request.method=='POST':
         exp=Expense.query.filter_by(id=id).first()
-        paid_by_mem=Member.query.filter_by(name=exp.paid_by, group_id=exp.group_id).first()
+        paid_by_mem=Member.query.filter_by(id=exp.paid_by, group_id=exp.group_id).first()
         paid_by_mem.paid=round(paid_by_mem.paid-exp.amt,2)
         paid_by_mem.balance=round(paid_by_mem.balance-exp.amt,2)
         db.session.add(paid_by_mem)
         db.session.commit()
-        paid_for=exp.paid_for.split()
-        for by in paid_for:
-            share=round(exp.amt/len(paid_for), 2)
-            paid_for_mem=Member.query.filter_by(name=by, group_id=exp.group_id).first()
+        for by in exp.paid_for:
+            share=round(exp.amt/len(exp.paid_for), 2)
+            paid_for_mem=Member.query.filter_by(id=by, group_id=exp.group_id).first()
             paid_for_mem.expense=round(paid_for_mem.expense-share, 2)
             paid_for_mem.balance=round(paid_for_mem.balance+share, 2)
             db.session.add(paid_for_mem)
@@ -249,13 +242,14 @@ def change_expense(id):
         name=request.form["name"]
         group_id=exp.group_id
         amt=int(request.form["amt"])
-        paid_by=request.form["paid_by"]
-        paid_for=""
+        paid_by_name=request.form["paid_by"]
+        paid_by=Member.query.filter_by(name=paid_by_name, group_id=group_id).first()
+        paid_for=[]
         i=0
         for key, val in request.form.items():
             if key.startswith("mem"):
-                paid_for+=val
-                paid_for+=" "
+                paid_for_mem=Member.query.filter_by(name=val, group_id=group_id).first()
+                paid_for.append(paid_for_mem.id)
                 i+=1
         if i==0:
             flash('Please add atleast 1 member to split the expense!')
@@ -263,10 +257,9 @@ def change_expense(id):
             members=db.session.query(Member).filter_by(group_id=group_id).all()
             return render_template("expense.html", group=group, members=members)
         else:
-            mem=Member.query.filter_by(name=paid_by, group_id=group_id).first()
-            mem.paid=round(mem.paid+amt, 2)
-            mem.balance=round(mem.balance+amt,2)
-            db.session.add(mem)
+            paid_by.paid=round(paid_by.paid+amt, 2)
+            paid_by.balance=round(paid_by.balance+amt,2)
+            db.session.add(paid_by)
             db.session.commit()
             share=round(amt/i, 2)
             members=db.session.query(Member).filter_by(group_id=group_id).all()
@@ -281,7 +274,7 @@ def change_expense(id):
             expense=Expense.query.filter_by(id=id).first()
             expense.name=name
             expense.amt=amt
-            expense.paid_by=paid_by
+            expense.paid_by=paid_by.id
             expense.paid_for=paid_for
             db.session.add(expense)
             db.session.commit()
@@ -297,15 +290,14 @@ def change_expense(id):
 @app.route('/delete_expense/<int:id>')
 def delete_expense(id):
     exp=Expense.query.filter_by(id=id).first()
-    paid_by_mem=Member.query.filter_by(name=exp.paid_by, group_id=exp.group_id).first()
+    paid_by_mem=Member.query.filter_by(id=exp.paid_by, group_id=exp.group_id).first()
     paid_by_mem.paid=round(paid_by_mem.paid-exp.amt,2)
     paid_by_mem.balance=round(paid_by_mem.balance-exp.amt,2)
     db.session.add(paid_by_mem)
     db.session.commit()
-    paid_for=exp.paid_for.split()
-    for by in paid_for:
-        share=round(exp.amt/len(paid_for), 2)
-        paid_for_mem=Member.query.filter_by(name=by, group_id=exp.group_id).first()
+    for by in exp.paid_for:
+        share=round(exp.amt/len(exp.paid_for), 2)
+        paid_for_mem=Member.query.filter_by(id=by, group_id=exp.group_id).first()
         paid_for_mem.expense=round(paid_for_mem.expense-share, 2)
         paid_for_mem.balance=round(paid_for_mem.balance+share, 2)
         db.session.add(paid_for_mem)
@@ -322,6 +314,7 @@ def delete_expense(id):
 def save_payments(payment):
     expense=payment.split()
     exp=""+expense[0]+" paid "+expense[4]+" to "+expense[6]
+    print(exp)
     paid_for=exp[2:len(exp)-2]
     pay=[]
     p = '[\d]+[.\d]+|[\d]*[.][\d]+|[\d]+'
@@ -343,9 +336,9 @@ def save_payments(payment):
     group_id=id
     name="Settled up"
     amt=float(pay[0])
-    paid_by=""+expense[0]
+    paid_by = int(pay[1])
     paid_by=paid_by[2:]
-    date=datetime.now().strftime("%d %b %X")
+    date=datetime.now(timezone.utc)
     expense=Expense(group_id=group_id, name=name, amt=amt, paid_by=paid_by, paid_for=paid_for, date=date)
     db.session.add(expense)
     db.session.commit()
