@@ -23,7 +23,7 @@
           <tr>
             <td>{{payment[0]}}</td>
             <td>
-            <a href="/save_payments/{{payment}}" onclick="clicked(event)" type="button" class="btn btn-dark btn-sm mx-1">Save Payment</a>
+            <a href="/save_payments/{{payment[1]}}/{{payment[2]}}/{{payment[3]}}" onclick="clicked(event)" type="button" class="btn btn-dark btn-sm mx-1">Save Payment</a>
             <td>
           </tr>
           {% endfor %}

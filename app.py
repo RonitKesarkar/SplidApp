@@ -57,25 +57,20 @@ def create_group():
         return redirect("/")
     return render_template("index.html", allGroups=Group.query.all())
 
-@app.route('/enter_group/<int:id>', methods=['GET', 'POST'])
+@app.route('/enter_group/<int:id>', methods=['GET'])
 def enter_group(id):
     group = Group.query.get_or_404(id)
-    if request.method == 'POST':
-        group.title = request.form["title"]
-        group.type = request.form["type"]
-        db.session.commit()
-        return redirect(f"/enter_group/{id}")
     members = Member.query.filter_by(group_id=id).all()
     expenses = Expense.query.filter_by(group_id=id).all()
     paid_by, paid_for = [], []
     for exp in expenses:
         payer = Member.query.get(exp.paid_by)
         paid_by.append(payer.name if payer else "Unknown")
-        names = [
-            Member.query.get(mid).name
-            for mid in (exp.paid_for or [])
-            if Member.query.get(mid)
-        ]
+        names = []
+        for mid in (exp.paid_for or []):
+            member = Member.query.get(mid)
+            if member:
+                names.append(member.name)
         paid_for.append(names)
     return render_template(
         "group.html",
@@ -122,10 +117,24 @@ def add_member(id):
 def update_member(id):
     m = Member.query.get_or_404(id)
     if request.method == 'POST':
-        m.name = request.form["name"]
+        name = request.form["name"].strip()
+        existing_member = Member.query.filter(
+            Member.name == name,
+            Member.group_id == m.group_id,
+            Member.id != m.id
+        ).first()
+        if existing_member:
+            flash("Member already exists")
+            return redirect(f"/update_member/{m.id}")
+        m.name = name
         db.session.commit()
+        flash("Member updated successfully")
         return redirect(f"/enter_group/{m.group_id}")
-    return render_template("member_update.html", member=m, group=Group.query.get(m.group_id))
+    return render_template(
+        "member_update.html",
+        member=m,
+        group=Group.query.get(m.group_id)
+    )
 
 # ---------------- EXPENSE ----------------
 
@@ -144,13 +153,15 @@ def add_expense(id):
             if not payer:
                 flash("Invalid payer")
                 return redirect(f"/enter_group/{id}")
-            paid_for = [
-                m.id
-                for k, v in request.form.items()
-                if k.startswith("mem")
-                for m in [Member.query.filter_by(name=v, group_id=id).first()]
-                if m
-            ]
+            paid_for = []
+            for k, v in request.form.items():
+                if k.startswith("mem"):
+                    m = Member.query.filter_by(
+                        name=v,
+                        group_id=id
+                    ).first()
+                    if m:
+                        paid_for.append(m.id)
             if not paid_for:
                 flash("Select at least one member")
                 return redirect(f"/enter_group/{id}")
@@ -198,13 +209,15 @@ def change_expense(id):
                     m.balance = round(m.balance + old_share, 2)
             amt = round(float(request.form["amt"]), 2)
             name = request.form["name"]
-            paid_for = [
-                m.id
-                for k, v in request.form.items()
-                if k.startswith("mem")
-                for m in [Member.query.filter_by(name=v, group_id=exp.group_id).first()]
-                if m
-            ]
+            paid_for = []
+            for k, v in request.form.items():
+                if k.startswith("mem"):
+                    member = Member.query.filter_by(
+                        name=v,
+                        group_id=exp.group_id
+                    ).first()
+                    if member:
+                        paid_for.append(member.id)
             if not paid_for:
                 flash("Select at least one member")
                 return redirect(f"/enter_group/{exp.group_id}")
@@ -289,21 +302,12 @@ def suggested_payments(id):
         payments=payments
     )
 
-@app.route('/save_payments/<payment>')
-def save_payments(payment):
-    pay = re.findall(r'\d+(?:\.\d+)?', payment)
-    if len(pay) < 3:
-        flash("Invalid payment")
-        return redirect("/")
-    amt = float(pay[0])
-    payer = Member.query.get(int(pay[1]))
-    receiver = Member.query.get(int(pay[2]))
-    if not payer or not receiver:
-        flash("Invalid users")
-        return redirect("/")
+@app.route('/save_payments/<int:payer_id>/<int:receiver_id>/<float:amt>')
+def save_payments(payer_id, receiver_id, amt):
+    payer = Member.query.get_or_404(payer_id)
+    receiver = Member.query.get_or_404(receiver_id)
     payer.balance = round(payer.balance + amt, 2)
     receiver.balance = round(receiver.balance - amt, 2)
-    db.session.add_all([payer, receiver])
     db.session.add(Expense(
         group_id=payer.group_id,
         name="Settled up",
@@ -313,6 +317,7 @@ def save_payments(payment):
         date=datetime.now(timezone.utc)
     ))
     db.session.commit()
+    flash("Payment settled successfully")
     return redirect(f"/enter_group/{payer.group_id}")
 
 # ---------------- NAV ----------------
